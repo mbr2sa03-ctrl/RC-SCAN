@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RC Attendance Scanner | World Vision Cambodia</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#5B3A21">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root {
@@ -139,12 +142,19 @@
 </div>
 
 <script>
-/* ====== CONFIG: auto-filled by the server when this page is served by Apps Script ====== */
-const WEB_APP_URL = '<?= webAppUrl ?>';
-/* ========================================================================================= */
+/* ====== CONFIG: your Apps Script backend (Code.gs) deployed Web App URL ====== */
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwNc-uNenNPO6TeXdCnlIT1VxqISRYcLmv8D67yodBCSh_tPtMKZJOvk-T9YfK-Vlcc2w/exec';
+/* ============================================================================== */
 
 document.getElementById('urlDisplay').textContent =
   WEB_APP_URL.includes('PASTE_') ? '⚠️ not configured — edit WEB_APP_URL in this file' : 'configured';
+
+// Register service worker so the app shell installs properly as a PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  });
+}
 
 let html5QrCode;
 let lastCode = null;
@@ -182,14 +192,64 @@ document.getElementById('manualSubmit').addEventListener('click', () => {
 function startScanner() {
   html5QrCode = new Html5Qrcode("reader");
   const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-  html5QrCode.start(
-    { facingMode: "environment" },
-    config,
-    (decodedText) => onScanSuccess(decodedText),
-    (errorMessage) => { /* ignore per-frame scan errors */ }
-  ).catch((err) => {
-    showStatus('error', 'Camera error: ' + err);
+
+  // First ask the browser which cameras exist. This forces the permission
+  // prompt to appear (needed on some Android/iOS browsers before start()
+  // will work) and lets us fall back gracefully if "environment" isn't
+  // available (e.g. desktop webcams, some iPads).
+  Html5Qrcode.getCameras().then((devices) => {
+    if (!devices || devices.length === 0) {
+      showStatus('error', 'No camera found on this device.');
+      return;
+    }
+
+    // Prefer a back/rear camera by label if we can find one, otherwise
+    // just fall back to facingMode "environment", otherwise the first camera.
+    const backCam = devices.find(d => /back|rear|environment/i.test(d.label));
+    const cameraTarget = backCam ? backCam.id : { facingMode: "environment" };
+
+    html5QrCode.start(
+      cameraTarget,
+      config,
+      (decodedText) => onScanSuccess(decodedText),
+      (errorMessage) => { /* ignore per-frame scan errors */ }
+    ).catch((err) => {
+      // If "environment" specifically failed, retry with the first
+      // available camera before giving up.
+      if (!backCam) {
+        html5QrCode.start(
+          devices[0].id,
+          config,
+          (decodedText) => onScanSuccess(decodedText),
+          (errorMessage) => {}
+        ).catch((err2) => showStatus('error', explainCameraError(err2)));
+      } else {
+        showStatus('error', explainCameraError(err));
+      }
+    });
+  }).catch((err) => {
+    showStatus('error', explainCameraError(err));
   });
+}
+
+function explainCameraError(err) {
+  const msg = (err && err.toString) ? err.toString() : String(err);
+  if (/NotAllowedError|Permission denied/i.test(msg)) {
+    return '✗ Camera permission was denied. Open your browser\'s site settings and allow Camera access for this page, then reload.';
+  }
+  if (/NotFoundError|no camera/i.test(msg)) {
+    return '✗ No camera device was found on this device/browser.';
+  }
+  if (/NotReadableError/i.test(msg)) {
+    return '✗ Camera is already in use by another app. Close other camera apps/tabs and try again.';
+  }
+  if (/OverconstrainedError/i.test(msg)) {
+    return '✗ Requested camera mode not supported on this device.';
+  }
+  if (/https|insecure/i.test(msg)) {
+    return '✗ Camera requires a secure (HTTPS) connection.';
+  }
+  return '✗ Camera error: ' + msg;
 }
 
 function stopScanner() {
