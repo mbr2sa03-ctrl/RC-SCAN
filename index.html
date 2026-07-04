@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RC Attendance Scanner | World Vision Cambodia</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#5B3A21">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --brown: #5B3A21;
+    --orange: #D8762B;
+    --cream: #FAF4EB;
+    --grey: #5A5A5A;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Khmer OS', 'Noto Sans Khmer', Arial, sans-serif;
+    background: var(--cream);
+    color: #222;
+  }
+  header {
+    background: var(--brown);
+    color: white;
+    padding: 18px 16px;
+    text-align: center;
+  }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 13px; color: #f0d9c2; }
+  .container {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: var(--grey);
+    margin-bottom: 4px;
+    font-weight: bold;
+  }
+  input[type=text] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 15px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  .btn-primary { background: var(--orange); color: white; }
+  .btn-secondary { background: #eee; color: #333; }
+  .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+  #reader { width: 100%; border-radius: 8px; overflow: hidden; }
+  #status {
+    padding: 12px;
+    border-radius: 8px;
+    margin-top: 8px;
+    font-size: 14px;
+    display: none;
+  }
+  #status.success { background: #e6f4ea; color: #1e7d34; display: block; }
+  #status.error { background: #fdecea; color: #b3261e; display: block; }
+  #status.info { background: #e8eef7; color: #1a4b8c; display: block; }
+  .log-item {
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .log-item:last-child { border-bottom: none; }
+  .log-item .code { font-weight: bold; color: var(--brown); }
+  .log-item .time { color: #999; }
+  .hidden { display: none; }
+  .config-note {
+    font-size: 12px;
+    color: #999;
+    text-align: center;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>អង្គការទស្សនៈពិភពលោកកម្ពុជា</h1>
+  <p>RC Attendance QR Scanner — Mongkol Borei 2</p>
+</header>
+
+<div class="container">
+
+  <div class="card" id="setupCard">
+    <label>ឈ្មោះកម្មវិធី / Activity Name</label>
+    <input type="text" id="activityName" placeholder="e.g. Sponsorship Community Day - July 2026">
+
+    <label>ឈ្មោះមន្ត្រី / Officer Name (optional)</label>
+    <input type="text" id="officerName" placeholder="Your name">
+
+    <button class="btn-primary" id="startBtn">📷 ចាប់ផ្តើមស្កេន / Start Scanning</button>
+  </div>
+
+  <div class="card hidden" id="scanCard">
+    <div id="reader"></div>
+    <button class="btn-secondary" id="stopBtn" style="margin-top:12px;">⏹ Stop Scanning</button>
+    <div id="status"></div>
+  </div>
+
+  <div class="card hidden" id="manualCard">
+    <label>បញ្ចូលកូដដោយដៃ / Manual Code Entry (if QR won't scan)</label>
+    <input type="text" id="manualCode" placeholder="CAM-199774-0005">
+    <button class="btn-secondary" id="manualSubmit">Submit Code</button>
+  </div>
+
+  <div class="card hidden" id="logCard">
+    <label style="margin-bottom:8px;">Recent Scans (this session)</label>
+    <div id="logList"></div>
+  </div>
+
+  <div class="config-note">
+    Backend: <span id="urlDisplay">not configured</span>
+  </div>
+</div>
+
+<script>
+/* ====== CONFIG: your Apps Script backend (Code.gs) deployed Web App URL ====== */
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxquL5akmdwOAEfR69ro892L9zGaLOM1T6km_moKiDryHdTSl559ZaiWatdprLUbmvC6A/exec';
+/* ============================================================================== */
+
+document.getElementById('urlDisplay').textContent =
+  WEB_APP_URL.includes('PASTE_') ? '⚠️ not configured — edit WEB_APP_URL in this file' : 'configured';
+
+// Register service worker so the app shell installs properly as a PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  });
+}
+
+let html5QrCode;
+let lastCode = null;
+let lastTime = 0;
+const COOLDOWN_MS = 4000;
+const sessionLog = [];
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  const activity = document.getElementById('activityName').value.trim();
+  if (!activity) {
+    alert('សូមបញ្ចូលឈ្មោះកម្មវិធីជាមុន / Please enter an Activity Name first.');
+    return;
+  }
+  document.getElementById('setupCard').classList.add('hidden');
+  document.getElementById('scanCard').classList.remove('hidden');
+  document.getElementById('manualCard').classList.remove('hidden');
+  document.getElementById('logCard').classList.remove('hidden');
+  startScanner();
+});
+
+document.getElementById('stopBtn').addEventListener('click', () => {
+  stopScanner();
+  document.getElementById('setupCard').classList.remove('hidden');
+  document.getElementById('scanCard').classList.add('hidden');
+});
+
+document.getElementById('manualSubmit').addEventListener('click', () => {
+  const code = document.getElementById('manualCode').value.trim();
+  if (code) {
+    submitAttendance(code);
+    document.getElementById('manualCode').value = '';
+  }
+});
+
+function startScanner() {
+  html5QrCode = new Html5Qrcode("reader");
+  const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+  // First ask the browser which cameras exist. This forces the permission
+  // prompt to appear (needed on some Android/iOS browsers before start()
+  // will work) and lets us fall back gracefully if "environment" isn't
+  // available (e.g. desktop webcams, some iPads).
+  Html5Qrcode.getCameras().then((devices) => {
+    if (!devices || devices.length === 0) {
+      showStatus('error', 'No camera found on this device.');
+      return;
+    }
+
+    // Prefer a back/rear camera by label if we can find one, otherwise
+    // just fall back to facingMode "environment", otherwise the first camera.
+    const backCam = devices.find(d => /back|rear|environment/i.test(d.label));
+    const cameraTarget = backCam ? backCam.id : { facingMode: "environment" };
+
+    html5QrCode.start(
+      cameraTarget,
+      config,
+      (decodedText) => onScanSuccess(decodedText),
+      (errorMessage) => { /* ignore per-frame scan errors */ }
+    ).catch((err) => {
+      // If "environment" specifically failed, retry with the first
+      // available camera before giving up.
+      if (!backCam) {
+        html5QrCode.start(
+          devices[0].id,
+          config,
+          (decodedText) => onScanSuccess(decodedText),
+          (errorMessage) => {}
+        ).catch((err2) => showStatus('error', explainCameraError(err2)));
+      } else {
+        showStatus('error', explainCameraError(err));
+      }
+    });
+  }).catch((err) => {
+    showStatus('error', explainCameraError(err));
+  });
+}
+
+function explainCameraError(err) {
+  const msg = (err && err.toString) ? err.toString() : String(err);
+  if (/NotAllowedError|Permission denied/i.test(msg)) {
+    return '✗ Camera permission was denied. Open your browser\'s site settings and allow Camera access for this page, then reload.';
+  }
+  if (/NotFoundError|no camera/i.test(msg)) {
+    return '✗ No camera device was found on this device/browser.';
+  }
+  if (/NotReadableError/i.test(msg)) {
+    return '✗ Camera is already in use by another app. Close other camera apps/tabs and try again.';
+  }
+  if (/OverconstrainedError/i.test(msg)) {
+    return '✗ Requested camera mode not supported on this device.';
+  }
+  if (/https|insecure/i.test(msg)) {
+    return '✗ Camera requires a secure (HTTPS) connection.';
+  }
+  return '✗ Camera error: ' + msg;
+}
+
+function stopScanner() {
+  if (html5QrCode) {
+    html5QrCode.stop().catch(() => {});
+  }
+}
+
+function onScanSuccess(code) {
+  const now = Date.now();
+  if (code === lastCode && (now - lastTime) < COOLDOWN_MS) {
+    return; // debounce duplicate rapid scans
+  }
+  lastCode = code;
+  lastTime = now;
+  submitAttendance(code);
+}
+
+function submitAttendance(code) {
+  const activity = document.getElementById('activityName').value.trim();
+  const officer = document.getElementById('officerName').value.trim();
+
+  if (WEB_APP_URL.includes('PASTE_')) {
+    showStatus('error', 'Backend not configured. Edit WEB_APP_URL in this file first.');
+    return;
+  }
+
+  showStatus('info', 'ដំណើរការ... / Recording ' + code + '...');
+
+  fetch(WEB_APP_URL, {
+    method: 'POST',
+    body: JSON.stringify({ code, activity, officer }),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === 'success') {
+      const label = data.verified ? (data.name || code) : code + ' (not found in roster)';
+      showStatus('success', '✓ ' + label + ' — recorded');
+      addLogEntry(code, data.verified);
+    } else {
+      showStatus('error', '✗ ' + (data.message || 'Failed to record.'));
+    }
+  })
+  .catch(err => {
+    showStatus('error', '✗ Network error: ' + err);
+  });
+}
+
+function addLogEntry(code, verified) {
+  const time = new Date().toLocaleTimeString();
+  sessionLog.unshift({ code, time, verified });
+  const list = document.getElementById('logList');
+  list.innerHTML = sessionLog.slice(0, 20).map(item =>
+    `<div class="log-item"><span class="code">${item.code}${item.verified ? '' : ' ⚠️'}</span><span class="time">${item.time}</span></div>`
+  ).join('');
+}
+
+function showStatus(type, message) {
+  const el = document.getElementById('status');
+  el.className = type;
+  el.textContent = message;
+}
+</script>
+
+</body>
+</html>

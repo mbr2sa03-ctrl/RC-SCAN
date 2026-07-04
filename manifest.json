@@ -1,0 +1,17 @@
+{
+  "name": "RC Attendance Scanner",
+  "short_name": "RC Scanner",
+  "description": "World Vision Cambodia — RC Attendance QR Scanner (Mongkol Borei 2)",
+  "start_url": "./index.html",
+  "id": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FAF4EB",
+  "theme_color": "#5B3A21",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
