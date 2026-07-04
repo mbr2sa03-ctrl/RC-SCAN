@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RC Attendance Scanner | World Vision Cambodia</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#5B3A21">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root {
@@ -139,12 +142,19 @@
 </div>
 
 <script>
-/* ====== CONFIG: auto-filled by the server when this page is served by Apps Script ====== */
-const WEB_APP_URL = '<?= webAppUrl ?>';
-/* ========================================================================================= */
+/* ====== CONFIG: your Apps Script backend (Code.gs) deployed Web App URL ====== */
+const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzpxVFQ_7e_T8sCPBnd8M2VCxUDQT-BlZIcQx9-3vNTwUE5p_e6mzeh5jMyHa6TGzW21g/exec';
+/* ============================================================================== */
 
 document.getElementById('urlDisplay').textContent =
   WEB_APP_URL.includes('PASTE_') ? '⚠️ not configured — edit WEB_APP_URL in this file' : 'configured';
+
+// Register service worker so the app shell installs properly as a PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  });
+}
 
 let html5QrCode;
 let lastCode = null;
